@@ -135,7 +135,7 @@ void Instance::solve() {
 
   Solution test(sites.size(), clients.size());
 
-  // write MILP solver here
+  // write heuristic solver here
 
   
 
