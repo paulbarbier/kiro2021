@@ -14,6 +14,8 @@
 
 using json = nlohmann::json;
 using namespace std;
+using namespace operations_research;
+
 
 Instance::Instance(const string& filename) : input_filename(filename) {
   cout << "Loading instance... \n";
@@ -112,8 +114,6 @@ Instance::Instance(const string& filename) : input_filename(filename) {
   solution = Solution(sites.size(), clients.size());
   visited_sites = vector<bool>(sites.size(), false);
   cout << "Instance " + input_filename + " successfully loaded!\n";
-
-
 }
 
 void Instance::solve() {
@@ -137,8 +137,58 @@ void Instance::solve() {
 
   // write MILP solver here using or-tools
 
+  //init solver
+  unique_ptr<MPSolver> solver(MPSolver::CreateSolver("SCIP"));
 
+  if (!solver) {
+    LOG(WARNING) << "SCIP solver unavailable.";
+    return;
+  }
+  cout << "SCIP solver successfully loaded!\n";
 
+  const size_t n = sites.size();
+  const size_t m = clients.size();
+  const double infinity = solver->infinity();
+
+  //init variables
+  vector<const MPVariable*> P(n), D(n), a(n), t(n);
+  vector<vector<const MPVariable*>> X(n, vector<const MPVariable*>(n));
+  vector<vector<const MPVariable*>> C_P(n, vector<const MPVariable*>(m));
+  vector<vector<const MPVariable*>> C_D(n, vector<const MPVariable*>(m));
+  vector<vector<const MPVariable*>> I_P(n, vector<const MPVariable*>(m));
+  vector<vector<const MPVariable*>> C_Pa(n, vector<const MPVariable*>(m));
+  vector<vector<const MPVariable*>> I_Pa(n, vector<const MPVariable*>(m));
+  
+  for(auto& var : P)
+    var = solver->MakeBoolVar("");
+  for(auto& var : D)
+    var = solver->MakeBoolVar("");
+  for(auto& var : a)
+    var = solver->MakeBoolVar("");
+  for(auto& var : t)
+    var = solver->MakeNumVar(0.0, infinity, "");
+
+  for(auto& row : X)
+    for(auto& var : row)
+      var = solver->MakeBoolVar("");
+  for(auto& row : C_P)
+    for(auto& var : row)
+      var = solver->MakeBoolVar("");
+  for(auto& row : C_D)
+    for(auto& var : row)
+      var = solver->MakeBoolVar("");
+  for(auto& row : I_P)
+    for(auto& var : row)
+      var = solver->MakeBoolVar("");
+  for(auto& row : C_Pa)
+    for(auto& var : row)
+      var = solver->MakeBoolVar("");
+  for(auto& row : I_Pa)
+    for(auto& var : row)
+      var = solver->MakeBoolVar("");
+
+  
+  
   //
 
   end = clock();

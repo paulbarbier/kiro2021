@@ -3,8 +3,10 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include "ortools/linear_solver/linear_solver.h"
 
 using namespace std;
+using namespace operations_research;
 
 struct Solution{
     vector<bool> P;
@@ -31,7 +33,7 @@ class Instance {
   vector<bool> visited_sites;
 
   Solution solution;
-
+  
   string input_filename;
   public:
     pair<float, float> barycentre();
