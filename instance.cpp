@@ -133,8 +133,6 @@ void Instance::solve() {
   solution.s[2] = 0;
   **/
 
-  Solution test(sites.size(), clients.size());
-
   // write MILP solver here using or-tools
 
   //init solver
@@ -187,8 +185,28 @@ void Instance::solve() {
     for(auto& var : row)
       var = solver->MakeBoolVar("");
 
+  // define the constraints
+
+
+
+  //define the objective function
+  MPObjective* const objective = solver->MutableObjective();
+  /**
+  for (int j = 0; j < data.num_vars; ++j) {
+    objective->SetCoefficient(x[j], data.obj_coeffs[j]);
+  }
+  **/
+  objective->SetMinimization();
   
+  //solve the minimization problem
+  const MPSolver::ResultStatus result_status = solver->Solve();
+
   
+  //retrieve the solution and put the data in solution
+
+
+  //end of MILP implementation
+  //
   //
 
   end = clock();
@@ -232,10 +250,10 @@ void Instance::save() {
 }
 
 Solution::Solution(int sites_number, int clients_number) {
-  P = vector<bool>(sites_number, false);
-  D = vector<bool>(sites_number, false);
-  a = vector<bool>(sites_number, true);
-  p = vector<int>(sites_number, -1);
-  s = vector<int>(clients_number, -1);
+  P = vector<bool>(sites_number);
+  D = vector<bool>(sites_number);
+  a = vector<bool>(sites_number);
+  p = vector<int>(sites_number);
+  s = vector<int>(clients_number);
 }
 
