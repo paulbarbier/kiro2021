@@ -33,7 +33,7 @@ class Instance {
   vector<bool> visited_sites;
 
   Solution solution;
-  
+
   string input_filename;
   public:
     pair<float, float> barycentre();

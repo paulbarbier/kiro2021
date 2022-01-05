@@ -112,7 +112,6 @@ Instance::Instance(const string& filename) : input_filename(filename) {
     input_file.close();
   }
   solution = Solution(sites.size(), clients.size());
-  visited_sites = vector<bool>(sites.size(), false);
   cout << "Instance " + input_filename + " successfully loaded!\n";
 }
 
@@ -164,7 +163,7 @@ void Instance::solve() {
   for(auto& var : a)
     var = solver->MakeBoolVar("");
   for(auto& var : t)
-    var = solver->MakeNumVar(0.0, infinity, "");
+    var = solver->MakeIntVar(0.0, infinity, "");
 
   for(auto& row : X)
     for(auto& var : row)
@@ -186,25 +185,187 @@ void Instance::solve() {
       var = solver->MakeBoolVar("");
 
   // define the constraints
+  for(int i = 0; i < n; ++i) {
+    MPConstraint* constraint = solver->MakeRowConstraint(0.0, 1.0, "");
+    constraint->SetCoefficient(P[i], 1);
+    constraint->SetCoefficient(D[i], 1);
+  }
+  for(int j = 0; j < n; ++j) {
+    MPConstraint* constraint1 = solver->MakeRowConstraint(0.0, 0.0, "");
+    //MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, infinity, "");
+    for(int i = 0; i < n; ++i) {
+      constraint1->SetCoefficient(X[i][j], 1);
+      //constraint2->SetCoefficient(X[i][j], 1);
+    }
+    constraint1->SetCoefficient(D[j], -1);
+    //constraint2->SetCoefficient(D[j], -1);
+  }
+  for(int j = 0; j < m; ++j) {
+    MPConstraint* constraint1 = solver->MakeRowConstraint(1.0, 1.0, "");
+    //MPConstraint* constraint2 = solver->MakeRowConstraint(-infinity, 1.0, "");
+    for(int i = 0; i < n; ++i) {
+      constraint1->SetCoefficient(C_P[i][j], 1);
+      constraint1->SetCoefficient(C_D[i][j], 1);
 
+      //constraint2->SetCoefficient(C_P[i][j], 1);
+      //constraint2->SetCoefficient(C_D[i][j], 1);
+    }
+  }
+  for(int i = 0; i < n; ++i) {
+    MPConstraint* constraint = solver->MakeRowConstraint(-1.0, 0.0, "");
+    constraint->SetCoefficient(a[i], 1);
+    constraint->SetCoefficient(P[i], -1);
+  }
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < n; ++j) {
+      MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 0.0, "");
+      constraint1->SetCoefficient(X[i][j], 1);
+      constraint1->SetCoefficient(P[i], -1);
 
+      MPConstraint* constraint2 = solver->MakeRowConstraint(-1.0, 0.0, "");
+      constraint2->SetCoefficient(X[i][j], 1);
+      constraint2->SetCoefficient(D[j], -1);
+    }
+  }
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < m; ++j) {
+      MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 0.0, "");
+      constraint1->SetCoefficient(C_P[i][j], 1);
+      constraint1->SetCoefficient(P[i], -1);
+
+      MPConstraint* constraint2 = solver->MakeRowConstraint(-1.0, 0.0, "");
+      constraint2->SetCoefficient(I_P[i][j], 1);
+      constraint2->SetCoefficient(P[i], -1);
+
+      MPConstraint* constraint3 = solver->MakeRowConstraint(-1.0, 0.0, "");
+      constraint3->SetCoefficient(C_D[i][j], 1);
+      constraint3->SetCoefficient(D[i], -1);
+    }
+  }
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < m; ++j) {
+      MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 1.0, "");
+      MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, n, "");
+      
+      for(int k = 0; k < n; ++k) {
+        constraint1->SetCoefficient(C_D[k][j], 1);
+        constraint1->SetCoefficient(X[i][k], 1);
+        constraint2->SetCoefficient(C_D[k][j], 0.5);
+        constraint2->SetCoefficient(X[i][k], 0.5);
+      }
+      constraint1->SetCoefficient(I_P[i][j], -1);
+      constraint2->SetCoefficient(I_P[i][j], -1);
+    }
+  }
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < m; ++j) {
+      MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 1.0, "");
+      MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, 1.0, "");
+      
+      constraint1->SetCoefficient(a[i], 1);
+      constraint1->SetCoefficient(C_P[i][j], 1);
+      constraint1->SetCoefficient(C_Pa[i][j], -1);
+
+      constraint2->SetCoefficient(a[i], 0.5);
+      constraint2->SetCoefficient(C_P[i][j], 0.5);
+      constraint2->SetCoefficient(C_Pa[i][j], -1);
+    }
+  }
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < m; ++j) {
+      MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 1.0, "");
+      MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, 1.0, "");
+      
+      constraint1->SetCoefficient(a[i], 1);
+      constraint1->SetCoefficient(I_P[i][j], 1);
+      constraint1->SetCoefficient(I_Pa[i][j], -1);
+
+      constraint2->SetCoefficient(a[i], 0.5);
+      constraint2->SetCoefficient(I_P[i][j], 0.5);
+      constraint2->SetCoefficient(C_Pa[i][j], -1);
+    }
+  }
+  for(int i = 0; i < n; ++i) {
+    MPConstraint* constraint = solver->MakeRowConstraint(-infinity, capacities[0], "");
+
+    constraint->SetCoefficient(t[i], -1);
+    constraint->SetCoefficient(a[i], -capacities[1]);
+    for(int j = 0; j < m; ++j) {
+      constraint->SetCoefficient(C_P[i][j], capacityCost*clients[j].first);
+      constraint->SetCoefficient(I_P[i][j], capacityCost*clients[j].first);
+    }
+  }
 
   //define the objective function
   MPObjective* const objective = solver->MutableObjective();
-  /**
-  for (int j = 0; j < data.num_vars; ++j) {
-    objective->SetCoefficient(x[j], data.obj_coeffs[j]);
+
+  for(int i = 0; i < n; ++i) {
+    objective->SetCoefficient(P[i], buildingCosts[0]);
+    objective->SetCoefficient(D[i], buildingCosts[2]);
+    objective->SetCoefficient(a[i], buildingCosts[1]);
   }
-  **/
+  for(int j = 0; j < m; ++j) {
+    for(int i = 0; i < n; ++i) {
+      objective->SetCoefficient(C_P[i][j], clients[j].first*(productionCosts[2] + siteClientDistances[i][j]*routingCosts[1]));
+      objective->SetCoefficient(C_Pa[i][j], -clients[j].first*productionCosts[1]);
+      objective->SetCoefficient(I_Pa[i][j], -clients[j].first*productionCosts[1]);
+    }
+  }
+  for(int j = 0; j < m; ++j) {
+    for(int i = 0; i < n; ++i) {
+      objective->SetCoefficient(C_D[i][j], clients[j].first*siteClientDistances[i][j]*routingCosts[1]);
+      for(int k = 0; k < n; ++k) {
+        objective->SetCoefficient(I_P[k][j], clients[j].first*siteSiteDistances[k][i]*routingCosts[0]);
+      }
+    }
+  }
+  for(int i = 0; i < n; ++i) {
+    objective->SetCoefficient(t[i], 1);
+  }
+
   objective->SetMinimization();
+  //additional constant cost to get the right optimal cost value
+  int constant_cost = 0;
+  for(int j = 0; j < m; ++j)
+    constant_cost += clients[j].first;
+  constant_cost *= productionCosts[0];
   
   //solve the minimization problem
   const MPSolver::ResultStatus result_status = solver->Solve();
+  if (result_status != MPSolver::OPTIMAL) {
+    LOG(FATAL) << "The problem does not have an optimal solution.";
+  }
+  LOG(INFO) << "Solution:";
+  LOG(INFO) << "Optimal objective value = " << objective->Value() + constant_cost;
 
-  
+  /**
+  for(auto& row : C_P) {
+    for(auto& var : row)
+      cout << var->solution_value() << " ";
+    cout << endl;
+  }
+  cout << "\n\n";
+  for(auto& row : C_D) {
+    for(auto& var : row)
+      cout << var->solution_value() << " ";
+    cout << endl;
+  }
+  **/
   //retrieve the solution and put the data in solution
-
-
+  for(int i = 0; i < n; ++i) {
+    //cout << P[i]->solution_value() << " " << D[i]->solution_value() << endl;
+    solution.P[i] = P[i]->solution_value();
+    solution.D[i] = D[i]->solution_value();
+    solution.a[i] = a[i]->solution_value();
+    int j = 0;
+    while(j < n && X[i][j]->solution_value() == 0) ++j;
+    solution.p[i] = j;
+  }
+  for(int j = 0; j < m; ++j) {
+    int i = 0;
+    while(i < n && (C_P[i][j]->solution_value() + C_D[i][j]->solution_value()) == 0) ++i;
+    solution.s[j] = i;
+  }
   //end of MILP implementation
   //
   //
@@ -250,10 +411,10 @@ void Instance::save() {
 }
 
 Solution::Solution(int sites_number, int clients_number) {
-  P = vector<bool>(sites_number);
-  D = vector<bool>(sites_number);
-  a = vector<bool>(sites_number);
-  p = vector<int>(sites_number);
-  s = vector<int>(clients_number);
+  P = vector<bool>(sites_number, false);
+  D = vector<bool>(sites_number, false);
+  a = vector<bool>(sites_number, false);
+  p = vector<int>(sites_number, 0);
+  s = vector<int>(clients_number, 0);
 }
 
