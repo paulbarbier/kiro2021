@@ -24,6 +24,9 @@ class Instance {
   vector<float> routingCosts;
   float capacityCost;
   vector<float> capacities;
+
+  float c_Pb, c_Ab, c_Db, c_Pp, c_Ap, c_Dp, c_1r, c_2r, u_P, u_A, cu;
+
   vector<pair<int, pair<float, float>>> clients;
   vector<pair<float, float>> sites;
   vector<vector<float>> siteSiteDistances;
