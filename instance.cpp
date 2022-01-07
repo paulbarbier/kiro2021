@@ -109,17 +109,6 @@ void Instance::solve() {
   time_t begin, end;
 
   begin = clock();
-  /**
-  solution.P[0] = true;
-  solution.D[1] = true;
-
-  solution.a[0] = true;
-  solution.p[1] = 0;
-
-  solution.s[0] = 1;
-  solution.s[1] = 1;
-  solution.s[2] = 0;
-  **/
 
   // write MILP solver here using or-tools
 
@@ -155,44 +144,61 @@ void Instance::solve() {
   for(auto& var : t)
     var = solver->MakeNumVar(0.0, infinity, "");
 
-  for(auto& row : X)
-    for(auto& var : row)
-      var = solver->MakeBoolVar("");
+  for(int i = 0; i < n; ++i)
+    for(int j = 0; j < n; ++j)
+      X[i][j] = solver->MakeBoolVar("");
+
   for(auto& row : C_P)
     for(auto& var : row)
       var = solver->MakeBoolVar("");
   for(auto& row : C_D)
     for(auto& var : row)
       var = solver->MakeBoolVar("");
+  
   for(auto& row : I_P)
     for(auto& var : row)
       var = solver->MakeBoolVar("");
+  
   for(auto& row : C_Pa)
     for(auto& var : row)
       var = solver->MakeBoolVar("");
   for(auto& row : I_Pa)
     for(auto& var : row)
       var = solver->MakeBoolVar("");
-
-  for(auto& matrix : v)
-    for(auto& row : matrix)
-      for(auto& var : row)
-        var = solver->MakeBoolVar("");
+  for(int i = 0; i < n; ++i)
+    for(int j = 0; j < m; ++j)
+      for(int k = 0; k < n; ++k)
+        v[i][j][k] = solver->MakeBoolVar("");
 
   // define the constraints
-
-  // 0 <= P_i + D_i <= 1
+  /**
+  // X_ii = 0
   for(int i = 0; i < n; ++i) {
-    MPConstraint* constraint = solver->MakeRowConstraint(0.0, 1.0, "");
+    MPConstraint* constraint = solver->MakeRowConstraint(0.0, 0.0, "");
+    constraint->SetCoefficient(X[i][i], 1);
+  }
+
+  // v_iji = 0
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < m; ++j) {
+      MPConstraint* constraint = solver->MakeRowConstraint(0.0, 0.0, "");
+      constraint->SetCoefficient(v[i][j][i], 1);
+    }
+  }
+  **/
+  // P_i + D_i <= 1
+  for(int i = 0; i < n; ++i) {
+    MPConstraint* constraint = solver->MakeRowConstraint(-infinity, 1.0, "");
     constraint->SetCoefficient(P[i], 1);
     constraint->SetCoefficient(D[i], 1);
   }
-
-  // \sum_i X_ij = D_j
+  
+  // \sum_i X_ij = D_j, i \neq j
   for(int j = 0; j < n; ++j) {
     MPConstraint* constraint = solver->MakeRowConstraint(0.0, 0.0, "");
     for(int i = 0; i < n; ++i) {
-      constraint->SetCoefficient(X[i][j], 1);
+      if(i != j)
+        constraint->SetCoefficient(X[i][j], 1);
     }
     constraint->SetCoefficient(D[j], -1);
   }
@@ -208,20 +214,22 @@ void Instance::solve() {
 
   // a_i <= P_i
   for(int i = 0; i < n; ++i) {
-    MPConstraint* constraint = solver->MakeRowConstraint(-1.0, 0.0, "");
+    MPConstraint* constraint = solver->MakeRowConstraint(-infinity, 0.0, "");
     constraint->SetCoefficient(a[i], 1);
     constraint->SetCoefficient(P[i], -1);
   }
-
-  // X_ij <= P_i
+  
+  // X_ij <= P_i, i \neq j
   for(int i = 0; i < n; ++i) {
     for(int j = 0; j < n; ++j) {
-      MPConstraint* constraint = solver->MakeRowConstraint(-1.0, 0.0, "");
-      constraint->SetCoefficient(X[i][j], 1);
-      constraint->SetCoefficient(P[i], -1);
+      if(i != j) {
+        MPConstraint* constraint = solver->MakeRowConstraint(-1.0, 0.0, "");
+        constraint->SetCoefficient(X[i][j], 1);
+        constraint->SetCoefficient(P[i], -1);
+      }
     }
   }
-
+  
   // C_P_ij <= P_i
   // C_D_ij <= D_i
   for(int i = 0; i < n; ++i) {
@@ -235,13 +243,46 @@ void Instance::solve() {
       constraint2->SetCoefficient(D[i], -1);
     }
   }
+  /**
+  // for testing
+  for(int i = 0; i < n; ++i) {
+    MPConstraint* c1 = solver->MakeRowConstraint(-infinity, 0.0, "");
+    MPConstraint* c2 = solver->MakeRowConstraint(0.0, infinity, "");
+    for(int j = 0; j < m; ++j) {
+      c1->SetCoefficient(C_P[i][j], 1/(double)m);
+      c2->SetCoefficient(C_P[i][j], 1);
+    }
+    for(int j = 0; j < n; ++j) {
+      if(i != j) {
+        c1->SetCoefficient(X[i][j], 1/(double)n);
+        c2->SetCoefficient(X[i][j], 1);
+      }
+    }
+    c1->SetCoefficient(P[i], -1);
+    c2->SetCoefficient(P[i], -1);
+  }
 
-  // I_P_ij = \sum_k v_ijk
+  
+  for(int i = 0; i < n; ++i) {
+    MPConstraint* c1 = solver->MakeRowConstraint(-infinity, 0.0, "");
+    MPConstraint* c2 = solver->MakeRowConstraint(0.0, infinity, "");
+    for(int j = 0; j < m; ++j) {
+      c1->SetCoefficient(C_D[i][j], 1/(double)m);
+      c2->SetCoefficient(C_D[i][j], 1);
+    }
+    c1->SetCoefficient(D[i], -1);
+    c2->SetCoefficient(D[i], -1);
+  }
+  //
+  **/
+  
+  // I_P_ij = \sum_k v_ijk, k \neq i
   for(int i = 0; i < n; ++i) {
     for(int j = 0; j < m; ++j) {
       MPConstraint* constraint = solver->MakeRowConstraint(0.0, 0.0, "");
       for(int k = 0; k < n; ++k) {
-        constraint->SetCoefficient(v[i][j][k], 1);
+        if(k != i)
+          constraint->SetCoefficient(v[i][j][k], 1);
       }
       constraint->SetCoefficient(I_P[i][j], -1);
     }
@@ -251,20 +292,23 @@ void Instance::solve() {
    * implemented constraints : v_ijk = X_ik*C_D_kj with :
    * (X_ik + C_D_kj - v_ijk) <= 1
    * v_ijk <= 0.5*(X_ik + C_D_kj)
-   */
+   * i \neq k
+   **/
   for(int i = 0; i < n; ++i) {
     for(int j = 0; j < m; ++j) {
       for(int k = 0; k < n; ++k) {
-        MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 1.0, "");
-        MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, 1.0, "");
+        if(i != k) {
+          MPConstraint* constraint1 = solver->MakeRowConstraint(-infinity, 1.0, "");
+          MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, infinity, "");
 
-        constraint1->SetCoefficient(C_D[k][j], 1);
-        constraint1->SetCoefficient(X[i][k], 1);
-        constraint1->SetCoefficient(v[i][j][k], -1);
+          constraint1->SetCoefficient(C_D[k][j], 1);
+          constraint1->SetCoefficient(X[i][k], 1);
+          constraint1->SetCoefficient(v[i][j][k], -1);
 
-        constraint2->SetCoefficient(C_D[k][j], 0.5);
-        constraint2->SetCoefficient(X[i][k], 0.5);
-        constraint2->SetCoefficient(v[i][j][k], -1);
+          constraint2->SetCoefficient(C_D[k][j], 0.5);
+          constraint2->SetCoefficient(X[i][k], 0.5);
+          constraint2->SetCoefficient(v[i][j][k], -1);
+        }
       }
     }
   }
@@ -273,8 +317,8 @@ void Instance::solve() {
   // 0 <= 0.5*(a_i + C_P_ij) - C_Pa_ij
   for(int i = 0; i < n; ++i) {
     for(int j = 0; j < m; ++j) {
-      MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 1.0, "");
-      MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, 1.0, "");
+      MPConstraint* constraint1 = solver->MakeRowConstraint(-infinity, 1.0, "");
+      MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, infinity, "");
       
       constraint1->SetCoefficient(a[i], 1);
       constraint1->SetCoefficient(C_P[i][j], 1);
@@ -290,45 +334,64 @@ void Instance::solve() {
   // 0 <= 0.5*(a_i + I_P_ij) - I_Pa_ij
   for(int i = 0; i < n; ++i) {
     for(int j = 0; j < m; ++j) {
-      MPConstraint* constraint1 = solver->MakeRowConstraint(-1.0, 1.0, "");
-      MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, 1.0, "");
+      MPConstraint* constraint1 = solver->MakeRowConstraint(-infinity, 1.0, "");
+      MPConstraint* constraint2 = solver->MakeRowConstraint(0.0, infinity, "");
       
       constraint1->SetCoefficient(a[i], 1);
       constraint1->SetCoefficient(I_P[i][j], 1);
       constraint1->SetCoefficient(I_Pa[i][j], -1);
+      
       /**
       for(int k = 0; k < n; ++k) {
-        constraint1->SetCoefficient(v[i][j][k], 1);
+        if(i != k)
+          constraint1->SetCoefficient(v[i][j][k], 1);
       }
       **/
 
       constraint2->SetCoefficient(a[i], 0.5);
       constraint2->SetCoefficient(I_P[i][j], 0.5);
       constraint2->SetCoefficient(I_Pa[i][j], -1);
+      
       /**
       for(int k = 0; k < n; ++k) {
-        constraint2->SetCoefficient(v[i][j][k], 0.5);
+        if(i != k)
+          constraint2->SetCoefficient(v[i][j][k], 0.5);
       }
       **/
     }
   }
-
   for(int i = 0; i < n; ++i) {
-    MPConstraint* constraint = solver->MakeRowConstraint(-infinity, u_P, "");
+    MPConstraint* constraint = solver->MakeRowConstraint(-infinity, cu*u_P, "");
 
     constraint->SetCoefficient(t[i], -1);
-    constraint->SetCoefficient(a[i], -u_A);
+    constraint->SetCoefficient(a[i], -cu*u_A);
     for(int j = 0; j < m; ++j) {
-      constraint->SetCoefficient(C_P[i][j], clients[j].first);
-      constraint->SetCoefficient(I_P[i][j], clients[j].first);
+      constraint->SetCoefficient(C_P[i][j], cu*clients[j].first);
+      constraint->SetCoefficient(I_P[i][j], cu*clients[j].first);
       /**
       for(int k = 0; k < n; ++k) {
-        constraint->SetCoefficient(v[i][j][k], clients[j].first);
+        if(i != k)
+          constraint->SetCoefficient(v[i][j][k], cu*clients[j].first);
       }
       **/
     }
   }
-
+  
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < m; ++j) {
+      MPConstraint* constraint = solver->MakeRowConstraint(0.0, 1.0, "");
+      constraint->SetCoefficient(C_P[i][j], 1);
+      constraint->SetCoefficient(I_P[i][j], 1);
+      /**
+      for(int l = 0; l < n; ++l) {
+        if(i != l)
+          constraint->SetCoefficient(v[i][j][l], 1);
+      }
+      **/
+    }
+  }
+  
+  
   //define the objective function
   MPObjective* const objective = solver->MutableObjective();
   
@@ -342,6 +405,7 @@ void Instance::solve() {
   // production cost
   for(int j = 0; j < m; ++j) {
     for(int i = 0; i < n; ++i) {
+      // here we put also the coefficient in front of C_D in routing cost
       objective->SetCoefficient(C_D[i][j], clients[j].first*(c_Dp + siteClientDistances[i][j]*c_2r));
       objective->SetCoefficient(C_Pa[i][j], -clients[j].first*c_Ap);
       objective->SetCoefficient(I_Pa[i][j], -clients[j].first*c_Ap);
@@ -355,17 +419,22 @@ void Instance::solve() {
       for(int k = 0; k < n; ++k) {
         /**
         for(int l = 0; l < n; ++l) {
-          objective->SetCoefficient(v[k][j][l], clients[j].first*siteSiteDistances[k][i]*routingCosts[0]);
+          if(k != l)
+            objective->SetCoefficient(v[k][j][l], clients[j].first*siteSiteDistances[k][i]*c_1r);
         }
         **/
-        objective->SetCoefficient(I_P[k][j], clients[j].first*siteSiteDistances[k][i]*c_1r);
+       //objective->SetCoefficient(I_P[k][j], clients[j].first*siteSiteDistances[k][i]*c_1r);
+        
+        // here I put X_ki instead of I_P_kj
+        if(k != i)
+          objective->SetCoefficient(X[k][i], clients[j].first*siteSiteDistances[k][i]*c_1r);
       }
     }
   }
   
   // capacity cost
   for(int i = 0; i < n; ++i) {
-    objective->SetCoefficient(t[i], cu);
+    objective->SetCoefficient(t[i], 1);
   }
 
   objective->SetMinimization();
@@ -381,36 +450,53 @@ void Instance::solve() {
     LOG(FATAL) << "The problem does not have an optimal solution.";
   }
   LOG(INFO) << "Optimal objective value = " << (objective->Value() + constant_cost)/1e4;
-
   /**
+  cout << "C_P:\n";
   for(auto& row : C_P) {
     for(auto& var : row)
-      cout << var->solution_value() << " ";
+      cout << int(var->solution_value()) << " ";
     cout << endl;
   }
   cout << "\n\n";
+  cout << "C_D:\n";
   for(auto& row : C_D) {
     for(auto& var : row)
-      cout << var->solution_value() << " ";
+      cout << int(var->solution_value()) << " ";
     cout << endl;
   }
+  cout << "X:\n";
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < n; ++j)
+      cout << int(X[i][j]->solution_value()) << " ";
+    cout << endl;
+  }
+  cout << "\nP D a\n";
   **/
   //retrieve the solution and put the data in solution
   for(int i = 0; i < n; ++i) {
-    //cout << P[i]->solution_value() << " " << D[i]->solution_value() << endl;
-    solution.P[i] = P[i]->solution_value();
-    solution.D[i] = D[i]->solution_value();
-    solution.a[i] = a[i]->solution_value();
-    int j = 0;
-    while(j < n && X[i][j]->solution_value() == 0) ++j;
-    if(j == n) --j;
-    solution.p[i] = j;
+    //cout << int(P[i]->solution_value()) << " " << int(D[i]->solution_value()) << " " << int(a[i]->solution_value()) << endl;
+    solution.P[i] = (int(P[i]->solution_value()) == 1);
+    solution.D[i] = (int(D[i]->solution_value()) == 1);
+    solution.a[i] = (int(a[i]->solution_value()) == 1);
+
+    if(solution.D[i] == false) {
+      solution.p[i] = -1;
+    } else {
+      for(int j = 0; j < n; ++j) {
+        if( j != i && int(X[j][i]->solution_value()) == 1) {
+          solution.p[i] = j;
+          break;
+        }
+      }
+    }
   }
   for(int j = 0; j < m; ++j) {
-    int i = 0;
-    while(i < n && C_P[i][j]->solution_value() + C_D[i][j]->solution_value() == 0) ++i;
-    if(i == n) --i;
-    solution.s[j] = i;
+    for(int i = 0; i < n; ++i) {
+      if(int(C_P[i][j]->solution_value()) + int(C_D[i][j]->solution_value()) == 1) {
+        solution.s[j] = i;
+        break;
+      }
+    }
   }
   //end of MILP implementation
   //
@@ -434,7 +520,7 @@ void Instance::save() {
 
   for(int i = 0; i < solution.P.size(); ++i) {
     if(solution.P[i])
-      json_solution["productionCenters"].push_back({{"id", i+1}, {"automation", int(solution.a[i])}});
+      json_solution["productionCenters"].push_back({{"id", i+1}, {"automation", solution.a[i] ? 1 : 0}});
   }
 
   for(int i = 0; i < solution.D.size(); ++i) {
