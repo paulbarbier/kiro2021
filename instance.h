@@ -26,6 +26,8 @@ class Instance {
   vector<pair<float, float>> sites;
   vector<vector<float>> siteSiteDistances;
   vector<vector<float>> siteClientDistances;
+
+  float c_Pb, c_Ab, c_Db, c_Pp, c_Ap, c_Dp, c_1r, c_2r, u_P, u_A, cu;
   
   vector<int> current_clients;
   vector<bool> visited_sites;
