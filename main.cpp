@@ -6,7 +6,7 @@ using namespace std;
 
 int main(int argc, char** argv) {
   srand(time(nullptr));
-  array<string, 4> filenames = {"KIRO-tiny.json", "KIRO-small.json", "KIRO-medium.json", "KIRO-large.json"};
+  array<string, 2> filenames = {"KIRO-medium.json", "KIRO-large.json"};
   for(string filename : filenames) {
     Instance instance(filename);
     instance.solve();
