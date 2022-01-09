@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <limits>
+#include <queue>
 
 #include <nlohmann/json.hpp>
 #include <ortools/linear_solver/linear_solver.h>
@@ -113,7 +114,6 @@ Instance::Instance(const string& filename) : input_filename(filename) {
     input_file.close();
   }
   solution = Solution(sites.size(), clients.size());
-  visited_sites = vector<bool>(sites.size(), false);
   cout << "Instance " + input_filename + " successfully loaded!\n";
 
   cout << "Center building costs:\n";
@@ -161,7 +161,7 @@ void Instance::solve() {
     demand += client.first;
 
   int min_production_center;
-  cout << (min_production_center = (int)(demand/(u_P + u_A)) + 2) << endl;
+  cout << "minimum production centers needed: " << (min_production_center = (int)(demand/(u_P + u_A)) + 2) << endl;
 
 
   //step 1: compute w_ij = d_j*\Delta_siteclient(i,j)
@@ -183,7 +183,7 @@ void Instance::solve() {
   }
 
   //step 3: assign clients and distribution sites
-  int max_siteclients = clients.size();
+  int max_siteclients = 500;
   int max_sitesites = 40;
 
   //vector<bool> visited_clients(m, false);
@@ -191,7 +191,7 @@ void Instance::solve() {
   vector<vector<int>> X_result(n);
   vector<float> tracked_obj(n, 0);
 
-  float alpha = 0.2;
+  float alpha = 0.95;
   float beta = 1.0;
   float _alpha = alpha*(float)(u_P + u_A);
   float _beta = beta*(float)(u_P + u_A);
@@ -200,10 +200,10 @@ void Instance::solve() {
   int n_visited_distribution = 0;
 
   while(n_visited_clients < m) {
-    if(demand > u_P + u_A) {
+    if(demand > (u_P + u_A)) {
       vector<float> obj(n, numeric_limits<float>::infinity());
       for(int i = 0; i < n; ++i) {
-        if(solution.D[i]) continue;
+        if(solution.D[i] || solution.P[i]) continue;
         
         unique_ptr<MPSolver> solver(MPSolver::CreateSolver("SCIP"));
         if (!solver) {
@@ -213,7 +213,7 @@ void Instance::solve() {
         //cout << "SCIP solver successfully loaded!\n";
         vector<const MPVariable*> X(m, nullptr);
 
-        MPConstraint* constraint = solver->MakeRowConstraint(_alpha*min( 1.0, 50.0/(n_visited_clients+1) ), _beta, "");
+        MPConstraint* constraint = solver->MakeRowConstraint(_alpha*min( 1.0, 70.0/(n_visited_clients+1) ), _beta, "");
         MPObjective* const objective = solver->MutableObjective();
 
         for(int j = 0; j < max_siteclients; ++j) {
@@ -240,7 +240,7 @@ void Instance::solve() {
         solver.reset();
       }
       int i_0 = min_element(obj.begin(), obj.end()) - obj.begin();
-
+      if(solution.D[i_0]) continue;
       solution.D[i_0] = true;
       ++n_visited_distribution;
       for(auto& j : X_result[i_0]) {
@@ -251,7 +251,13 @@ void Instance::solve() {
         demand -= clients[j].first;
       }
 
-      std::cout << m-n_visited_clients << " remaining.\n";
+      if(tracked_obj[i_0] > 0.2*(u_P+u_A)) {
+        solution.D[i_0] = false;
+        solution.P[i_0] = true;
+        solution.a[i_0] = !(tracked_obj[i_0] <= u_P);
+      }
+
+      std::cout << m-n_visited_clients << " clients remaining.\n";
 
     } else { // we compute the barycenter of the remaining clients to be supplied
       pair<float, float> barycenter({0, 0});
@@ -266,24 +272,25 @@ void Instance::solve() {
 
       int id = 0;
       for(; id < n; ++id) {
-        if(!solution.D[id]) {
+        if(!solution.D[id] && !solution.P[id]) {
           break;
         }
       }
 
       for (int i = id+1; i < n; i++){
-        if(solution.D[i]) continue;
+        if(solution.D[i] || solution.P[i]) continue;
         if (dist2(sites[id], barycenter) > dist2(sites[i], barycenter)) {
           id = i;
         }
       }
 
-      solution.D[id] = true;
-      ++n_visited_distribution;
+      solution.P[id] = true;
+      solution.a[id] = !(demand <= u_P);
+      //++n_visited_distribution;
       for(int i = 0; i < m; ++i) {
         if(solution.s[i] >= 0) continue;
         solution.s[i] = id;
-        tracked_obj[id] += clients[i].first;
+        //tracked_obj[id] += clients[i].first;
         ++n_visited_clients;
       }
     }
@@ -306,14 +313,63 @@ void Instance::solve() {
   }
 
   // step 5: compute barycenter and assign production sites to distribution site
-  vector<bool> visited_distribution(n, false);
+  unordered_set<int> distribution_centers;
+  for(int i = 0; i < n; ++i) {
+    if(solution.D[i]) distribution_centers.insert(i);
+  }
+
+  while(!distribution_centers.empty()) {
+    int first = *distribution_centers.begin();
+    distribution_centers.erase(first);
+
+    vector<int> neighbours;
+    neighbours.push_back(first);
+    
+    pair<float, float> barycenter(sites[first]);
+    float capacity = tracked_obj[first];
+
+    for(int j = 0; (j < n-1) && (capacity <= (u_P + u_A)); ++j) {
+      if(distribution_centers.find(order_sitesite[first][j]) != distribution_centers.end()) {
+        neighbours.push_back(order_sitesite[first][j]);
+        distribution_centers.erase(order_sitesite[first][j]);
+
+        barycenter.first += sites[order_sitesite[first][j]].first;
+        barycenter.second += sites[order_sitesite[first][j]].second;
+        capacity += tracked_obj[order_sitesite[first][j]];
+      }
+    }
+    barycenter.first /= (float)(neighbours.size());
+    barycenter.second /= (float)(neighbours.size());
+
+    int production_id = 0;
+    for(; production_id < n; ++production_id) {
+      if(!solution.P[production_id] && !solution.D[production_id])
+        break;
+    }
+
+    for(int k = production_id+1; k < n; ++k) {
+      if(solution.P[k] || solution.D[k]) continue;
+      if(dist2(sites[production_id], barycenter) > dist2(sites[k], barycenter)) {
+        production_id = k;
+      }
+    }
+
+    solution.P[production_id] = true;
+    solution.a[production_id] = !(capacity <= u_P);
+
+    for(auto& distribution : neighbours) {
+      solution.p[distribution] = production_id;
+    }
+  }
+  /**
+  //vector<bool> visited_distribution(n, false);
   while(n_visited_distribution > 0) {
     int first = 0;
     for(; first < n; ++first) {
       if(solution.D[first])
         break;
     }
-    visited_distribution[first] = true;
+    //visited_distribution[first] = true;
     vector<int> neighbours;
     neighbours.push_back(first);
     pair<float, float> barycenter(sites[first]);
@@ -321,7 +377,7 @@ void Instance::solve() {
     float capacity = tracked_obj[first];
 
     for(int j = 0; (j < n-1) && (capacity <= u_P + u_A); ++j) {
-      if(solution.D[order_sitesite[first][j]] && !visited_distribution[order_sitesite[first][j]]) {
+      if(!visited_distribution[order_sitesite[first][j]] && !solution.P[order_sitesite[first][j]] && solution.D[order_sitesite[first][j]]) {
         visited_distribution[order_sitesite[first][j]] = true;
         neighbours.push_back(order_sitesite[first][j]);
 
@@ -331,8 +387,8 @@ void Instance::solve() {
         capacity += tracked_obj[order_sitesite[first][j]];
       }
     }
-    barycenter.first /= (float)neighbours.size();
-    barycenter.second /= (float)neighbours.size();
+    barycenter.first /= (float)(neighbours.size());
+    barycenter.second /= (float)(neighbours.size());
 
     int production_id = 0;
     for(; production_id < n; ++production_id) {
@@ -355,7 +411,7 @@ void Instance::solve() {
       --n_visited_distribution;
     }
   }
-
+  **/
   end = clock();
 
   std::cout << "Instance successfully solved in " << (end - begin)/(float)CLOCKS_PER_SEC << " seconds.\n";
@@ -379,7 +435,7 @@ void Instance::save() {
 
   for(int i = 0; i < solution.D.size(); ++i) {
     if(solution.D[i])
-      json_solution["distributionCenters"].push_back({{"id", i+1}, {"parent", solution.p[i]+1}});
+      json_solution["distributionCenters"].push_back({{"id", i+1}, {"parent", (solution.p[i]+1)}});
   }
 
   for(int i = 0; i < solution.s.size(); ++i) {
@@ -402,4 +458,69 @@ Solution::Solution(int sites_number, int clients_number) {
   a = vector<bool>(sites_number, false);
   p = vector<int>(sites_number, -1);
   s = vector<int>(clients_number, -1);
+}
+
+// Compute the cost of a solution
+float Instance::compute_cost(){
+    float building_cost = 0;
+    float capacity_cost = 0;
+    for (int i = 0; i < solution.P.size(); i++){
+        if (solution.P[i]){
+            building_cost += c_Pb + solution.a[i]*c_Ab;
+            int demand = 0;
+            for (int j = 0; j < clients.size(); j++){
+                if (solution.s[j] == i || solution.p[solution.s[j]] == i){
+                    demand += clients[j].first;
+                }
+            }
+            float t = cu*(demand - u_P -  solution.a[i]*u_A);
+            if (t > 0){
+                capacity_cost += t;
+            }
+        }
+        if (solution.D[i]){
+            building_cost += c_Db;
+        }
+    }
+
+    float production_cost = 0;
+    float routing_cost = 0;
+    for (int i = 0; i < clients.size(); i++){
+        if (solution.P[solution.s[i]]){
+            production_cost += clients[i].first * (c_Pp - solution.a[solution.s[i]]*c_Ap);
+            routing_cost += clients[i].first * c_2r * siteClientDistances[solution.s[i]][i];
+        }
+        if (solution.D[solution.s[i]]){
+            production_cost += clients[i].first * (c_Pb - solution.a[solution.p[solution.s[i]]]*c_Ap + c_Dp);
+            routing_cost += clients[i].first * (c_1r * siteSiteDistances[solution.p[solution.s[i]]][solution.s[i]] + c_2r * siteClientDistances[solution.s[i]][i]);
+        }
+    }
+
+    return building_cost + capacity_cost + production_cost + routing_cost;
+
+}
+
+// Check une solution
+bool Instance::is_valid(){
+    for (int i = 0; i < solution.P.size(); i++){
+        if (solution.P[i] + solution.D[i] == 2){
+            return false;
+        }
+        if (solution.a[i] > solution.P[i]){
+            return false;
+        }
+    }
+    for (int i = 0; i < solution.p.size(); i++){
+        if (solution.P[solution.p[i]] == 0){
+            return false;
+        }
+    }
+
+    for (int i = 0; i < solution.s.size(); i++){
+        if (solution.P[solution.s[i]] + solution.D[solution.s[i]] != 1){
+            return false;
+        }
+    }
+
+    return true;
 }

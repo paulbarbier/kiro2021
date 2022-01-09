@@ -40,4 +40,6 @@ class Instance {
     Instance(const string& filename);
     void solve();
     void save();
+    float compute_cost();
+    bool is_valid();
 };
