@@ -7,6 +7,7 @@
 #include <set>
 #include <cstdlib>
 #include <algorithm>
+#include <limits>
 
 #include <nlohmann/json.hpp>
 #include <ortools/linear_solver/linear_solver.h>
@@ -15,6 +16,7 @@
 
 using json = nlohmann::json;
 using namespace std;
+using namespace operations_research;
 
 Instance::Instance(const string& filename) : input_filename(filename) {
   cout << "Loading instance... \n";
@@ -132,6 +134,15 @@ Instance::Instance(const string& filename) : input_filename(filename) {
   cout << "u_P = " << (u_P = capacities[0]) << endl;
   cout << "u_A = " << (u_A = capacities[1]) << endl;
   cout << "c^u = " << (cu = capacityCost) << endl;
+
+  cout << "clients: " << clients.size() << " sites: " << sites.size() << endl;
+}
+
+float dist2(pair<float, float>& x, pair<float, float>& y) {
+    float a = x.first - y.first;
+    float b = x.second - y.second;
+    float d = a*a + b*b;
+    return d;
 }
 
 void Instance::solve() {
@@ -145,9 +156,13 @@ void Instance::solve() {
   // write heuristic solver here
   
   //step 0: compute the demand
-  int demand = 0;
+  float demand = 0;
   for(auto& client : clients)
     demand += client.first;
+
+  int min_production_center;
+  cout << (min_production_center = (int)(demand/(u_P + u_A)) + 2) << endl;
+
 
   //step 1: compute w_ij = d_j*\Delta_siteclient(i,j)
   vector<vector<float>> w(n, vector<float>(m));
@@ -161,32 +176,189 @@ void Instance::solve() {
     for(int j = 0; j < m; ++j) {
       order_siteclient[i][j] = j;
     }
-    auto compare_client = [*this, i] (float x, float y) {
+    auto compare_client = [*this, i] (int x, int y) {
       return this->siteClientDistances[i][x] < this->siteClientDistances[i][y];
     };
     sort(order_siteclient[i].begin(), order_siteclient[i].end(), compare_client);
   }
 
   //step 3: assign clients and distribution sites
-  int n_visited_clients = 0;
-  vector<bool> visited_clients(m, false);
-  vector<bool> visited_sites(n, false);
-  float alpha = 0.1;
-  float beta = 0.3;
+  int max_siteclients = clients.size();
+  int max_sitesites = 40;
+
+  //vector<bool> visited_clients(m, false);
+  //vector<bool> visited_sites(n, false);
+  vector<vector<int>> X_result(n);
+  vector<float> tracked_obj(n, 0);
+
+  float alpha = 0.2;
+  float beta = 1.0;
   float _alpha = alpha*(float)(u_P + u_A);
   float _beta = beta*(float)(u_P + u_A);
 
-  while(n_visited_clients <= m) {
-    if(demand > alpha) {
-      
-    } else {
+  int n_visited_clients = 0;
+  int n_visited_distribution = 0;
 
+  while(n_visited_clients < m) {
+    if(demand > u_P + u_A) {
+      vector<float> obj(n, numeric_limits<float>::infinity());
+      for(int i = 0; i < n; ++i) {
+        if(solution.D[i]) continue;
+        
+        unique_ptr<MPSolver> solver(MPSolver::CreateSolver("SCIP"));
+        if (!solver) {
+          LOG(WARNING) << "SCIP solver unavailable.";
+          return;
+        }
+        //cout << "SCIP solver successfully loaded!\n";
+        vector<const MPVariable*> X(m, nullptr);
+
+        MPConstraint* constraint = solver->MakeRowConstraint(_alpha*min( 1.0, 50.0/(n_visited_clients+1) ), _beta, "");
+        MPObjective* const objective = solver->MutableObjective();
+
+        for(int j = 0; j < max_siteclients; ++j) {
+          if(solution.s[order_siteclient[i][j]] >= 0) continue;
+          X[order_siteclient[i][j]] = solver->MakeBoolVar("");
+          constraint->SetCoefficient(X[order_siteclient[i][j]], clients[order_siteclient[i][j]].first);
+          objective->SetCoefficient(X[order_siteclient[i][j]], w[i][order_siteclient[i][j]]);
+        }
+
+        objective->SetMinimization();
+        const MPSolver::ResultStatus result_status = solver->Solve();
+        obj[i] = objective->Value();
+        //cout << "obj:" << (obj[i] = objective->Value()) << "\n";
+        for(int k = 0; k < m; ++k) {
+          if(X[k] != nullptr && int(X[k]->solution_value()) == 1) {
+            X_result[i].push_back(k);
+          }
+        }
+
+        if (result_status != MPSolver::OPTIMAL) {
+          LOG(FATAL) << "The problem does not have an optimal solution.";
+        }
+        //cout << i << " site processed.\n";
+        solver.reset();
+      }
+      int i_0 = min_element(obj.begin(), obj.end()) - obj.begin();
+
+      solution.D[i_0] = true;
+      ++n_visited_distribution;
+      for(auto& j : X_result[i_0]) {
+        if(solution.s[j] >= 0) continue;
+        solution.s[j] = i_0;
+        tracked_obj[i_0] += clients[j].first;
+        ++n_visited_clients;
+        demand -= clients[j].first;
+      }
+
+      std::cout << m-n_visited_clients << " remaining.\n";
+
+    } else { // we compute the barycenter of the remaining clients to be supplied
+      pair<float, float> barycenter({0, 0});
+      for(int i = 0; i < m; ++i) {
+        if(solution.s[i] >= 0) continue;
+
+        barycenter.first += clients[i].second.first;
+        barycenter.second += clients[i].second.second;
+      }
+      barycenter.first /= (float)(m-n_visited_clients);
+      barycenter.second /= (float)(m-n_visited_clients);
+
+      int id = 0;
+      for(; id < n; ++id) {
+        if(!solution.D[id]) {
+          break;
+        }
+      }
+
+      for (int i = id+1; i < n; i++){
+        if(solution.D[i]) continue;
+        if (dist2(sites[id], barycenter) > dist2(sites[i], barycenter)) {
+          id = i;
+        }
+      }
+
+      solution.D[id] = true;
+      ++n_visited_distribution;
+      for(int i = 0; i < m; ++i) {
+        if(solution.s[i] >= 0) continue;
+        solution.s[i] = id;
+        tracked_obj[id] += clients[i].first;
+        ++n_visited_clients;
+      }
+    }
+  }
+  std::cout << "number of distribution sites: " << n_visited_distribution << endl;
+
+  //step 5: assign production sites and bind them with distribution center
+    //preliminary: ordering the sites by site distance
+  vector<vector<int>> order_sitesite(n);
+  for(int i = 0; i < n; ++i) {
+    for(int j = 0; j < n; ++j) {
+      if(i != j) {
+        order_sitesite[i].push_back(j);
+      }
+    }
+    auto compare_site = [*this, i] (int x, int y) {
+      return this->siteSiteDistances[i][x] < this->siteSiteDistances[i][y];
+    };
+    sort(order_sitesite[i].begin(), order_sitesite[i].end(), compare_site);
+  }
+
+  // step 5: compute barycenter and assign production sites to distribution site
+  vector<bool> visited_distribution(n, false);
+  while(n_visited_distribution > 0) {
+    int first = 0;
+    for(; first < n; ++first) {
+      if(solution.D[first])
+        break;
+    }
+    visited_distribution[first] = true;
+    vector<int> neighbours;
+    neighbours.push_back(first);
+    pair<float, float> barycenter(sites[first]);
+
+    float capacity = tracked_obj[first];
+
+    for(int j = 0; (j < n-1) && (capacity <= u_P + u_A); ++j) {
+      if(solution.D[order_sitesite[first][j]] && !visited_distribution[order_sitesite[first][j]]) {
+        visited_distribution[order_sitesite[first][j]] = true;
+        neighbours.push_back(order_sitesite[first][j]);
+
+        barycenter.first += sites[order_sitesite[first][j]].first;
+        barycenter.second += sites[order_sitesite[first][j]].second;
+
+        capacity += tracked_obj[order_sitesite[first][j]];
+      }
+    }
+    barycenter.first /= (float)neighbours.size();
+    barycenter.second /= (float)neighbours.size();
+
+    int production_id = 0;
+    for(; production_id < n; ++production_id) {
+      if(!solution.P[production_id] && !solution.D[production_id])
+        break;
+    }
+
+    for(int k = production_id+1; k < n; ++k){
+      if(solution.P[k] || solution.D[k]) continue;
+      if(dist2(sites[production_id], barycenter) > dist2(sites[k], barycenter)) {
+        production_id = k;
+      }
+    }
+
+    solution.P[production_id] = true;
+    solution.a[production_id] = !(capacity <= u_P);
+
+    for(auto& distribution : neighbours) {
+      solution.p[distribution] = production_id;
+      --n_visited_distribution;
     }
   }
 
   end = clock();
 
-  cout << "Instance successfully solved in " << (end - begin)/(float)CLOCKS_PER_SEC << " seconds.\n";
+  std::cout << "Instance successfully solved in " << (end - begin)/(float)CLOCKS_PER_SEC << " seconds.\n";
 }
 
 void Instance::save() {
@@ -202,7 +374,7 @@ void Instance::save() {
 
   for(int i = 0; i < solution.P.size(); ++i) {
     if(solution.P[i])
-      json_solution["productionCenters"].push_back({{"id", i+1}, {"automation", solution.a[i] ? 1 : 0}});
+      json_solution["productionCenters"].push_back({{"id", i+1}, {"automation", (solution.a[i] ? 1 : 0)}});
   }
 
   for(int i = 0; i < solution.D.size(); ++i) {
@@ -228,6 +400,6 @@ Solution::Solution(int sites_number, int clients_number) {
   P = vector<bool>(sites_number, false);
   D = vector<bool>(sites_number, false);
   a = vector<bool>(sites_number, false);
-  p = vector<int>(sites_number, 0);
-  s = vector<int>(clients_number, 0);
+  p = vector<int>(sites_number, -1);
+  s = vector<int>(clients_number, -1);
 }
